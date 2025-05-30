@@ -1,0 +1,14 @@
+[Unit]
+Description=SDC Process Monitor Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/data/work/python_work/ws/sdc_monitor
+ExecStart=/usr/bin/python3 /data/work/python_work/ws/sdc_monitor/monitor.py
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# Process monitoring configuration
+processes:
+  - name: python  # Process name to monitor
+  - name: windsurf
+  - name: google-chrome
+  - name: tabby
+  # Add more processes as needed
+
+# Monitoring settings
+settings:
+  interval: 5  # Monitoring interval in seconds
+  output_dir: "./output"  # Directory to save results
+  web_enabled: true # Enable web interface for real-time monitoring
+  web_port: 5001  # Port for the web interface
+  pdf_enabled: true  # Enable PDF generation
+  direct_pdf: true  # Use direct PDF generation instead of HTML conversion
