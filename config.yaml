@@ -12,5 +12,5 @@ settings:
   output_dir: "./output"  # Directory to save results
   web_enabled: true # Enable web interface for real-time monitoring
   web_port: 5001  # Port for the web interface
-  pdf_enabled: true  # Enable PDF generation
-  direct_pdf: true  # Use direct PDF generation instead of HTML conversion
+  pdf_enabled: false # Enable PDF generation
+  direct_pdf: false # Use direct PDF generation instead of HTML conversion

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-u7b80u5316u7248PDFu751fu6210u5de5u5177
+简化版PDF生成工具
 
-u63d0u4f9bu7b80u5355u7684PDFu751fu6210u529fu80fduff0cu5305u542bu8868u683cu548cu6587u5b57u4fe1u606f
+提供简单的PDF生成功能，包含表格和文字信息
 """
 
 import os
@@ -10,13 +10,13 @@ import logging
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from datetime import datetime
+from PyPDF2 import PdfMerger
 
-# u914du7f6eu65e5u5fd7
+# 配置日志
 logger = logging.getLogger(__name__)
 
-# u5c1du8bd5u5bfcu5165kaleidouff08Plotlyu7684u9759u6001u5bfcu51fau5f15u64ceuff09
+# 尝试导入kaleido（Plotly的静态导出引擎）
 try:
     import kaleido
     KALEIDO_AVAILABLE = True
@@ -25,38 +25,30 @@ except ImportError:
     KALEIDO_AVAILABLE = False
 
 
-def create_pdf_report(data, output_path):
+def create_system_info_table(data, output_path):
     """
-    u521bu5efau5305u542bu8868u683cu548cu56feu8868u7684PDFu62a5u544a
+    创建系统信息表格PDF
     
     Args:
-        data: u76d1u63a7u6570u636eu5b57u5178
-        output_path: u8f93u51faPDFu6587u4ef6u8defu5f84
+        data: 监控数据字典
+        output_path: 输出PDF文件路径
         
     Returns:
-        u751fu6210u7684PDFu6587u4ef6u8defu5f84uff0cu5982u679cu5931u8d25u5219u8fd4u56deNone
+        生成的PDF文件路径，如果失败则返回None
     """
     if not KALEIDO_AVAILABLE:
         logger.error("Kaleido is required for PDF export. Please install with 'pip install kaleido'")
         return None
         
     try:
-        # u786eu4fddu65f6u95f4u6233u662fdatetimeu5bf9u8c61
-        timestamps = data.get('timestamp', [])
-        if timestamps and not isinstance(timestamps[0], pd.Timestamp):
-            try:
-                timestamps = pd.to_datetime(timestamps)
-            except Exception as e:
-                logger.warning(f"Could not convert timestamps: {e}")
-        
-        # u51c6u5907u7cfbu7edfu6982u89c8u6570u636e
+        # 准备系统概览数据
         system_info = []
         
-        # u7cfbu7edfu8d1fu8f7d
+        # 系统负载
         for load_key, load_name in [
-            ('system_load_1', '1u5206u949fu8d1fu8f7d'),
-            ('system_load_5', '5u5206u949fu8d1fu8f7d'),
-            ('system_load_15', '15u5206u949fu8d1fu8f7d')
+            ('system_load_1', '1分钟负载'),
+            ('system_load_5', '5分钟负载'),
+            ('system_load_15', '15分钟负载')
         ]:
             if load_key in data:
                 load_values = data[load_key]
@@ -67,7 +59,7 @@ def create_pdf_report(data, output_path):
                     f"{np.min(load_values):.2f}"
                 ])
         
-        # CPUu4f7fu7528u7387
+        # CPU使用率
         cpu_cols = [col for col in data.keys() if col.startswith('cpu_') and col.endswith('_percent')]
         if cpu_cols:
             cpu_values = []
@@ -76,13 +68,83 @@ def create_pdf_report(data, output_path):
                     cpu_values.extend(data[col])
             
             system_info.append([
-                'CPUu4f7fu7528u7387 (%)',
+                'CPU使用率 (%)',
                 f"{np.mean(cpu_values):.2f}",
                 f"{np.max(cpu_values):.2f}",
                 f"{np.min(cpu_values):.2f}"
             ])
+            
+        # 转置数据以适应表格格式
+        headers = ['指标', '平均值', '最大值', '最小值']
+        cells_data = list(zip(*system_info)) if system_info else [[] for _ in range(len(headers))]
         
-        # u51c6u5907u8fdbu7a0bu4fe1u606fu6570u636e
+        # 创建表格图形
+        fig = go.Figure(data=[go.Table(
+            header=dict(
+                values=headers,
+                line_color='darkslategray',
+                fill_color='royalblue',
+                align='center',
+                font=dict(color='white', size=12)
+            ),
+            cells=dict(
+                values=cells_data,
+                line_color='darkslategray',
+                fill_color='lightcyan',
+                align='center'
+            )
+        )])
+        
+        # 设置标题
+        timestamps = data.get('timestamp', [])
+        if len(timestamps) > 0:
+            try:
+                timestamps = pd.to_datetime(timestamps)
+                start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
+                end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                monitoring_period = f"监控时间段: {start_time} 至 {end_time}"
+            except:
+                monitoring_period = "监控时间段: 未知"
+        else:
+            monitoring_period = "监控时间段: 未知"
+            
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        fig.update_layout(
+            title=f"系统概览统计<br>{monitoring_period}<br>生成时间: {current_time}",
+            height=400
+        )
+        
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        
+        # 导出为PDF
+        fig.write_image(output_path, engine="kaleido")
+        
+        logger.info(f"Successfully created system info table PDF: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error creating system info table PDF: {e}", exc_info=True)
+        return None
+
+
+def create_process_table(data, output_path):
+    """
+    创建进程信息表格PDF
+    
+    Args:
+        data: 监控数据字典
+        output_path: 输出PDF文件路径
+        
+    Returns:
+        生成的PDF文件路径，如果失败则返回None
+    """
+    if not KALEIDO_AVAILABLE:
+        logger.error("Kaleido is required for PDF export. Please install with 'pip install kaleido'")
+        return None
+        
+    try:
+        # 准备进程信息数据
         proc_info = []
         proc_names = set()
         for key in data.keys():
@@ -95,7 +157,7 @@ def create_pdf_report(data, output_path):
             mem_key = f"{proc_name}_memory_rss"
             status_key = f"{proc_name}_status"
             
-            # CPUu4f7fu7528u7387
+            # CPU使用率
             cpu_avg = "N/A"
             cpu_max = "N/A"
             if cpu_key in data:
@@ -104,7 +166,7 @@ def create_pdf_report(data, output_path):
                     cpu_avg = f"{np.mean(cpu_values):.2f}%"
                     cpu_max = f"{np.max(cpu_values):.2f}%"
             
-            # u5185u5b58u4f7fu7528
+            # 内存使用
             mem_avg = "N/A"
             mem_max = "N/A"
             if mem_key in data:
@@ -113,190 +175,270 @@ def create_pdf_report(data, output_path):
                     mem_avg = f"{np.mean(mem_values)/1024/1024:.2f} MB"
                     mem_max = f"{np.max(mem_values)/1024/1024:.2f} MB"
             
-            # u72b6u6001
+            # 状态
             status = "N/A"
             if status_key in data:
                 statuses = [s for s in data[status_key] if s is not None]
                 if statuses:
-                    # u83b7u53d6u6700u540eu4e00u4e2au72b6u6001
+                    # 获取最后一个状态
                     status = statuses[-1]
             
             proc_info.append([proc_name, cpu_avg, cpu_max, mem_avg, mem_max, status])
+            
+        # 转置数据以适应表格格式
+        headers = ['进程名', '平均CPU', '最大CPU', '平均内存', '最大内存', '最后状态']
+        cells_data = list(zip(*proc_info)) if proc_info else [[] for _ in range(len(headers))]
         
-        # u521bu5efau4e00u4e2au5305u542bu591au4e2au5b50u56feu7684u56feu8868
-        fig = make_subplots(
-            rows=5, 
-            cols=1,
-            subplot_titles=(
-                "u7cfbu7edfu6982u89c8u8868",
-                "u8fdbu7a0bu76d1u63a7u7edfu8ba1u8868",
-                "u7cfbu7edfu8d1fu8f7du56fe", 
-                "u8fdbu7a0bCPUu4f7fu7528u7387u56fe", 
-                "u8fdbu7a0bu5185u5b58u4f7fu7528u56fe"
+        # 创建表格图形
+        fig = go.Figure(data=[go.Table(
+            header=dict(
+                values=headers,
+                line_color='darkslategray',
+                fill_color='forestgreen',
+                align='center',
+                font=dict(color='white', size=12)
             ),
-            vertical_spacing=0.05,
-            row_heights=[0.15, 0.2, 0.2, 0.2, 0.2]
-        )
-        
-        # u6dfbu52a0u7cfbu7edfu6982u89c8u8868u683c
-        fig.add_trace(
-            go.Table(
-                header=dict(
-                    values=['<b>u6307u6807</b>', '<b>u5e73u5747u503c</b>', '<b>u6700u5927u503c</b>', '<b>u6700u5c0fu503c</b>'],
-                    line_color='darkslategray',
-                    fill_color='royalblue',
-                    align='center',
-                    font=dict(color='white', size=12)
-                ),
-                cells=dict(
-                    values=list(zip(*system_info)) if system_info else [[], [], [], []],
-                    line_color='darkslategray',
-                    fill_color='lightcyan',
-                    align='center'
-                )
-            ),
-            row=1, col=1
-        )
-        
-        # u6dfbu52a0u8fdbu7a0bu76d1u63a7u7edfu8ba1u8868u683c
-        fig.add_trace(
-            go.Table(
-                header=dict(
-                    values=['<b>u8fdbu7a0bu540d</b>', '<b>u5e73u5747CPU</b>', '<b>u6700u5927CPU</b>', 
-                           '<b>u5e73u5747u5185u5b58</b>', '<b>u6700u5927u5185u5b58</b>', '<b>u6700u540eu72b6u6001</b>'],
-                    line_color='darkslategray',
-                    fill_color='forestgreen',
-                    align='center',
-                    font=dict(color='white', size=12)
-                ),
-                cells=dict(
-                    values=list(zip(*proc_info)) if proc_info else [[], [], [], [], [], []],
-                    line_color='darkslategray',
-                    fill_color='palegreen',
-                    align='center'
-                )
-            ),
-            row=2, col=1
-        )
-        
-        # u6dfbu52a0u7cfbu7edfu8d1fu8f7du56feu8868
-        fig.add_trace(
-            go.Scatter(x=timestamps, y=data.get('system_load_1', []), name="1u5206u949f", legendgroup="load"),
-            row=3, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=timestamps, y=data.get('system_load_5', []), name="5u5206u949f", legendgroup="load"),
-            row=3, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=timestamps, y=data.get('system_load_15', []), name="15u5206u949f", legendgroup="load"),
-            row=3, col=1
-        )
-        
-        # u6dfbu52a0u8fdbu7a0bCPUu4f7fu7528u7387u56feu8868
-        proc_cpu_cols = [col for col in data.keys() if col.endswith('_cpu_percent') and not col.startswith('cpu_')]
-        for col in proc_cpu_cols:
-            proc_name = col.split('_cpu_percent')[0]
-            fig.add_trace(
-                go.Scatter(x=timestamps, y=data.get(col, []), name=proc_name, legendgroup="proc_cpu"),
-                row=4, col=1
+            cells=dict(
+                values=cells_data,
+                line_color='darkslategray',
+                fill_color='palegreen',
+                align='center'
             )
+        )])
         
-        # u6dfbu52a0u8fdbu7a0bu5185u5b58u4f7fu7528u56feu8868
-        proc_mem_cols = [col for col in data.keys() if col.endswith('_memory_rss')]
-        for col in proc_mem_cols:
-            proc_name = col.split('_memory_rss')[0]
-            # u8f6cu6362u4e3aMB
-            memory_mb = [val/1024/1024 for val in data.get(col, [])]
-            fig.add_trace(
-                go.Scatter(x=timestamps, y=memory_mb, name=proc_name, legendgroup="proc_mem"),
-                row=5, col=1
-            )
-        
-        # u751fu6210u62a5u544au6807u9898u548cu65f6u95f4u4fe1u606f
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        if timestamps:
-            start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
-            end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
-            monitoring_period = f"u76d1u63a7u65f6u95f4u6bb5: {start_time} u81f3 {end_time}"
+        # 设置标题
+        timestamps = data.get('timestamp', [])
+        if len(timestamps) > 0:
+            try:
+                timestamps = pd.to_datetime(timestamps)
+                start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
+                end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                monitoring_period = f"监控时间段: {start_time} 至 {end_time}"
+            except:
+                monitoring_period = "监控时间段: 未知"
         else:
-            monitoring_period = "u76d1u63a7u65f6u95f4u6bb5: u672au77e5"
-        
-        report_title = f"u7cfbu7edfu548cu8fdbu7a0bu76d1u63a7u62a5u544a<br>{monitoring_period}<br>u751fu6210u65f6u95f4: {current_time}"
-        
-        # u66f4u65b0u5e03u5c40
+            monitoring_period = "监控时间段: 未知"
+            
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         fig.update_layout(
-            height=1200,  # u8c03u6574u9ad8u5ea6u4ee5u5bb9u7eb3u6240u6709u5185u5bb9
-            title=dict(
-                text=report_title,
-                font=dict(size=16)
-            ),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.15,
-                xanchor="center",
-                x=0.5,
-                groupclick="toggleitem"
-            ),
-            annotations=[
-                dict(
-                    text="u6ce8: u672cu62a5u544au663eu793au7cfbu7edfu548cu8fdbu7a0bu7684u76d1u63a7u6570u636euff0cu5305u62ecCPUu4f7fu7528u7387u3001u5185u5b58u4f7fu7528u548cu7cfbu7edfu8d1fu8f7du3002",
-                    showarrow=False,
-                    xref="paper",
-                    yref="paper",
-                    x=0,
-                    y=-0.18,
-                    font=dict(size=10),
-                    align="left"
-                )
-            ]
+            title=f"进程监控统计<br>{monitoring_period}<br>生成时间: {current_time}",
+            height=400 + 30 * len(proc_info)  # 根据进程数量调整高度
         )
         
-        # u6dfbu52a0Yu8f74u6807u9898
-        fig.update_yaxes(title_text="u8d1fu8f7d", row=3, col=1)
-        fig.update_yaxes(title_text="CPU %", row=4, col=1)
-        fig.update_yaxes(title_text="u5185u5b58 (MB)", row=5, col=1)
-        
-        # u786eu4fddu8f93u51fau76eeu5f55u5b58u5728
+        # 确保输出目录存在
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         
-        # u5bfcu51fau4e3aPDF
+        # 导出为PDF
         fig.write_image(output_path, engine="kaleido")
         
-        logger.info(f"Successfully created PDF report: {output_path}")
+        logger.info(f"Successfully created process table PDF: {output_path}")
         return output_path
         
     except Exception as e:
-        logger.error(f"Error creating PDF report: {e}", exc_info=True)
+        logger.error(f"Error creating process table PDF: {e}", exc_info=True)
         return None
 
 
-def create_cpu_cores_pdf(data, output_path):
+def create_system_charts(data, output_path):
     """
-    u521bu5efaCPUu6838u5fc3u76d1u63a7PDFu62a5u544a
+    创建系统监控图表PDF
     
     Args:
-        data: u76d1u63a7u6570u636eu5b57u5178
-        output_path: u8f93u51faPDFu6587u4ef6u8defu5f84
+        data: 监控数据字典
+        output_path: 输出PDF文件路径
         
     Returns:
-        u751fu6210u7684PDFu6587u4ef6u8defu5f84uff0cu5982u679cu5931u8d25u5219u8fd4u56deNone
+        生成的PDF文件路径，如果失败则返回None
     """
     if not KALEIDO_AVAILABLE:
         logger.error("Kaleido is required for PDF export. Please install with 'pip install kaleido'")
         return None
         
     try:
-        # u83b7u53d6u6240u6709CPUu6838u5fc3u5217
+        # 确保时间戳是datetime对象
+        timestamps = data.get('timestamp', [])
+        if len(timestamps) > 0:
+            if not isinstance(timestamps[0], pd.Timestamp):
+                try:
+                    timestamps = pd.to_datetime(timestamps)
+                except Exception as e:
+                    logger.warning(f"Could not convert timestamps: {e}")
+        
+        # 创建一个包含两个子图的图表
+        fig = go.Figure()
+        
+        # 添加系统负载图表
+        for load_key, load_name, color in [
+            ('system_load_1', "1分钟", "blue"),
+            ('system_load_5', "5分钟", "green"),
+            ('system_load_15', "15分钟", "red")
+        ]:
+            fig.add_trace(
+                go.Scatter(x=timestamps, y=data.get(load_key, []), name=load_name, line=dict(color=color))
+            )
+        
+        # 设置标题和布局
+        if len(timestamps) > 0:
+            try:
+                start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
+                end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                monitoring_period = f"监控时间段: {start_time} 至 {end_time}"
+            except:
+                monitoring_period = "监控时间段: 未知"
+        else:
+            monitoring_period = "监控时间段: 未知"
+            
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        fig.update_layout(
+            title=f"系统负载监控<br>{monitoring_period}<br>生成时间: {current_time}",
+            xaxis_title="时间",
+            yaxis_title="负载",
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5
+            )
+        )
+        
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        
+        # 导出为PDF
+        fig.write_image(output_path, engine="kaleido")
+        
+        logger.info(f"Successfully created system charts PDF: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error creating system charts PDF: {e}", exc_info=True)
+        return None
+
+
+def create_process_charts(data, output_path):
+    """
+    创建进程监控图表PDF
+    
+    Args:
+        data: 监控数据字典
+        output_path: 输出PDF文件路径
+        
+    Returns:
+        生成的PDF文件路径，如果失败则返回None
+    """
+    if not KALEIDO_AVAILABLE:
+        logger.error("Kaleido is required for PDF export. Please install with 'pip install kaleido'")
+        return None
+        
+    try:
+        # 确保时间戳是datetime对象
+        timestamps = data.get('timestamp', [])
+        if len(timestamps) > 0:
+            if not isinstance(timestamps[0], pd.Timestamp):
+                try:
+                    timestamps = pd.to_datetime(timestamps)
+                except Exception as e:
+                    logger.warning(f"Could not convert timestamps: {e}")
+        
+        # 创建图表
+        fig = go.Figure()
+        
+        # 添加CPU使用率子图
+        fig.add_trace(go.Scatter(x=[None], y=[None], name="CPU使用率", line=dict(color="rgba(0,0,0,0)")))
+        
+        # 添加进程CPU使用率图表
+        proc_cpu_cols = [col for col in data.keys() if col.endswith('_cpu_percent') and not col.startswith('cpu_')]
+        for i, col in enumerate(proc_cpu_cols):
+            proc_name = col.split('_cpu_percent')[0]
+            fig.add_trace(
+                go.Scatter(x=timestamps, y=data.get(col, []), name=f"{proc_name} CPU", 
+                          line=dict(color=f"hsl({(i*50)%360}, 70%, 50%)"))
+            )
+        
+        # 添加内存使用率子图
+        fig.add_trace(go.Scatter(x=[None], y=[None], name="内存使用", line=dict(color="rgba(0,0,0,0)")))
+        
+        # 添加进程内存使用图表
+        proc_mem_cols = [col for col in data.keys() if col.endswith('_memory_rss')]
+        for i, col in enumerate(proc_mem_cols):
+            proc_name = col.split('_memory_rss')[0]
+            # 转换为MB
+            memory_mb = [val/1024/1024 for val in data.get(col, [])]
+            fig.add_trace(
+                go.Scatter(x=timestamps, y=memory_mb, name=f"{proc_name} 内存", 
+                          line=dict(color=f"hsl({(i*50+180)%360}, 70%, 50%)"))
+            )
+        
+        # 设置标题和布局
+        if len(timestamps) > 0:
+            try:
+                start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
+                end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                monitoring_period = f"监控时间段: {start_time} 至 {end_time}"
+            except:
+                monitoring_period = "监控时间段: 未知"
+        else:
+            monitoring_period = "监控时间段: 未知"
+            
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        fig.update_layout(
+            title=f"进程CPU和内存监控<br>{monitoring_period}<br>生成时间: {current_time}",
+            xaxis_title="时间",
+            yaxis_title="使用率",
+            height=800,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5
+            )
+        )
+        
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        
+        # 导出为PDF
+        fig.write_image(output_path, engine="kaleido")
+        
+        logger.info(f"Successfully created process charts PDF: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error creating process charts PDF: {e}", exc_info=True)
+        return None
+
+
+def create_cpu_cores_pdf(data, output_path):
+    """
+    创建CPU核心监控PDF报告
+    
+    Args:
+        data: 监控数据字典
+        output_path: 输出PDF文件路径
+        
+    Returns:
+        生成的PDF文件路径，如果失败则返回None
+    """
+    if not KALEIDO_AVAILABLE:
+        logger.error("Kaleido is required for PDF export. Please install with 'pip install kaleido'")
+        return None
+        
+    try:
+        # 获取所有CPU核心列
         cpu_cols = [col for col in data.keys() if col.startswith('cpu_') and col.endswith('_percent')]
         
-        # u8ba1u7b97u5b50u56feu5e03u5c40
+        # 计算子图布局
         cpu_count = len(cpu_cols)
-        subplot_cols = min(4, cpu_count)  # u6700u591a4u5217
-        subplot_rows = (cpu_count + subplot_cols - 1) // subplot_cols  # u5411u4e0au53d6u6574
+        subplot_cols = min(4, cpu_count)  # 最多4列
+        subplot_rows = (cpu_count + subplot_cols - 1) // subplot_cols  # 向上取整
         
-        # u521bu5efau5b50u56fe
+        # 创建子图
+        from plotly.subplots import make_subplots
         fig = make_subplots(
             rows=subplot_rows,
             cols=subplot_cols,
@@ -305,15 +447,16 @@ def create_cpu_cores_pdf(data, output_path):
             horizontal_spacing=0.05
         )
         
-        # u786eu4fddu65f6u95f4u6233u662fdatetimeu5bf9u8c61
+        # 确保时间戳是datetime对象
         timestamps = data.get('timestamp', [])
-        if timestamps and not isinstance(timestamps[0], pd.Timestamp):
-            try:
-                timestamps = pd.to_datetime(timestamps)
-            except Exception as e:
-                logger.warning(f"Could not convert timestamps: {e}")
+        if len(timestamps) > 0:
+            if not isinstance(timestamps[0], pd.Timestamp):
+                try:
+                    timestamps = pd.to_datetime(timestamps)
+                except Exception as e:
+                    logger.warning(f"Could not convert timestamps: {e}")
         
-        # u6dfbu52a0u6bcfu4e2aCPUu6838u5fc3u7684u4f7fu7528u7387u56feu8868
+        # 添加每个CPU核心的使用率图表
         for i, col in enumerate(cpu_cols):
             cpu_num = col.split('_')[1]
             row = i // subplot_cols + 1
@@ -324,34 +467,37 @@ def create_cpu_cores_pdf(data, output_path):
                 row=row, col=col_pos
             )
             
-            # u6dfbu52a0Yu8f74u6807u9898
+            # 添加Y轴标题
             fig.update_yaxes(title_text="CPU %", row=row, col=col_pos)
         
-        # u751fu6210u62a5u544au6807u9898u548cu65f6u95f4u4fe1u606f
+        # 生成报告标题和时间信息
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        if timestamps:
-            start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
-            end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
-            monitoring_period = f"u76d1u63a7u65f6u95f4u6bb5: {start_time} u81f3 {end_time}"
+        if len(timestamps) > 0:
+            try:
+                start_time = timestamps[0].strftime('%Y-%m-%d %H:%M:%S')
+                end_time = timestamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                monitoring_period = f"监控时间段: {start_time} 至 {end_time}"
+            except:
+                monitoring_period = "监控时间段: 未知"
         else:
-            monitoring_period = "u76d1u63a7u65f6u95f4u6bb5: u672au77e5"
+            monitoring_period = "监控时间段: 未知"
         
-        report_title = f"CPUu6838u5fc3u4f7fu7528u7387u76d1u63a7u62a5u544a<br>{monitoring_period}<br>u751fu6210u65f6u95f4: {current_time}"
+        report_title = f"CPU核心使用率监控报告<br>{monitoring_period}<br>生成时间: {current_time}"
         
-        # u66f4u65b0u5e03u5c40
+        # 更新布局
         fig.update_layout(
-            height=200 * subplot_rows + 100,  # u6839u636eu884cu6570u8c03u6574u9ad8u5ea6
+            height=200 * subplot_rows + 100,  # 根据行数调整高度
             title=dict(
                 text=report_title,
                 font=dict(size=16)
             ),
-            showlegend=False  # u9690u85cfu56feu4f8buff0cu56e0u4e3au5b50u56feu6807u9898u5df2u7ecfu8db3u591f
+            showlegend=False  # 隐藏图例，因为子图标题已经足够
         )
         
-        # u786eu4fddu8f93u51fau76eeu5f55u5b58u5728
+        # 确保输出目录存在
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         
-        # u5bfcu51fau4e3aPDF
+        # 导出为PDF
         fig.write_image(output_path, engine="kaleido")
         
         logger.info(f"Successfully created CPU cores PDF report: {output_path}")
@@ -362,26 +508,90 @@ def create_cpu_cores_pdf(data, output_path):
         return None
 
 
-def create_pdf_reports(data, base_path):
+def merge_pdfs(pdf_files, output_path):
     """
-    u4eceu76d1u63a7u6570u636eu521bu5efaPDFu62a5u544a
+    合并多个PDF文件为一个
     
     Args:
-        data: u76d1u63a7u6570u636eu5b57u5178
-        base_path: u57fau7840u6587u4ef6u8defu5f84uff08u4e0du542bu6269u5c55u540duff09
+        pdf_files: PDF文件路径列表
+        output_path: 输出PDF文件路径
         
     Returns:
-        u751fu6210u7684PDFu6587u4ef6u8defu5f84u5217u8868
+        合并后的PDF文件路径，如果失败则返回None
+    """
+    try:
+        merger = PdfMerger()
+        
+        for pdf in pdf_files:
+            if os.path.exists(pdf):
+                merger.append(pdf)
+            else:
+                logger.warning(f"PDF file not found: {pdf}")
+        
+        merger.write(output_path)
+        merger.close()
+        
+        logger.info(f"Successfully merged PDFs to: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error merging PDFs: {e}", exc_info=True)
+        return None
+
+
+def create_pdf_reports(data, base_path):
+    """
+    从监控数据创建PDF报告
+    
+    Args:
+        data: 监控数据字典
+        base_path: 基础文件路径（不含扩展名）
+        
+    Returns:
+        生成的PDF文件路径列表
     """
     pdf_paths = []
+    temp_pdfs = []
     
-    # u521bu5efau7cfbu7edfu548cu8fdbu7a0bu76d1u63a7PDF
-    system_pdf_path = f"{base_path}_system.pdf"
-    system_result = create_pdf_report(data, system_pdf_path)
-    if system_result:
-        pdf_paths.append(system_result)
+    # 创建系统信息表格PDF
+    system_table_path = f"{base_path}_system_table.pdf"
+    system_table_result = create_system_info_table(data, system_table_path)
+    if system_table_result:
+        temp_pdfs.append(system_table_result)
     
-    # u521bu5efaCPUu6838u5fc3u76d1u63a7PDF
+    # 创建进程信息表格PDF
+    process_table_path = f"{base_path}_process_table.pdf"
+    process_table_result = create_process_table(data, process_table_path)
+    if process_table_result:
+        temp_pdfs.append(process_table_result)
+    
+    # 创建系统监控图表PDF
+    system_charts_path = f"{base_path}_system_charts.pdf"
+    system_charts_result = create_system_charts(data, system_charts_path)
+    if system_charts_result:
+        temp_pdfs.append(system_charts_result)
+    
+    # 创建进程监控图表PDF
+    process_charts_path = f"{base_path}_process_charts.pdf"
+    process_charts_result = create_process_charts(data, process_charts_path)
+    if process_charts_result:
+        temp_pdfs.append(process_charts_result)
+    
+    # 创建完整系统报告PDF（合并表格和图表）
+    if temp_pdfs:
+        system_pdf_path = f"{base_path}_system.pdf"
+        merged_result = merge_pdfs(temp_pdfs, system_pdf_path)
+        if merged_result:
+            pdf_paths.append(merged_result)
+            
+            # 清理临时PDF文件
+            for pdf in temp_pdfs:
+                try:
+                    os.remove(pdf)
+                except:
+                    pass
+    
+    # 创建CPU核心监控PDF
     cpu_pdf_path = f"{base_path}_cpu_cores.pdf"
     cpu_result = create_cpu_cores_pdf(data, cpu_pdf_path)
     if cpu_result:

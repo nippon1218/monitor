@@ -9,6 +9,7 @@ import os
 import json
 import threading
 import time
+import datetime
 from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO
 
@@ -65,8 +66,31 @@ class MonitorWebApp:
         """
         while not self.thread_stop_event.is_set():
             if self.monitor_data:
-                self.socketio.emit('update_data', json.dumps(self.monitor_data))
+                # 创建一个可以JSON序列化的数据副本
+                serializable_data = self._make_json_serializable(self.monitor_data)
+                self.socketio.emit('update_data', json.dumps(serializable_data))
             time.sleep(1)
+            
+    def _make_json_serializable(self, data):
+        """
+        将数据转换为可JSON序列化的格式
+        
+        Args:
+            data: 要转换的数据
+            
+        Returns:
+            可JSON序列化的数据
+        """
+        if isinstance(data, dict):
+            return {k: self._make_json_serializable(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._make_json_serializable(item) for item in data]
+        elif isinstance(data, (datetime.datetime, datetime.date)):
+            return data.isoformat()
+        elif isinstance(data, (int, float, str, bool, type(None))):
+            return data
+        else:
+            return str(data)  # 将其他类型转换为字符串
     
     def update_data(self, data):
         """
